@@ -7,7 +7,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import java.lang.Integer.max
 import java.text.DecimalFormat
 
-class CurrencyAmountInputVisualTransformation : VisualTransformation {
+class CurrencyAmountInputVisualTransformation(
+    private val fixedCursorAtTheEnd: Boolean = true
+) : VisualTransformation {
 
     companion object {
         const val CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS = 2
@@ -50,26 +52,75 @@ class CurrencyAmountInputVisualTransformation : VisualTransformation {
             text.paragraphStyles
         )
 
-        val offsetMapping = ThousandSeparatorOffsetMapping(
-            originalIntegerLength = intPart.length
-        )
+        val offsetMapping = if (fixedCursorAtTheEnd) {
+            FixedCursorOffsetMapping(
+                unmaskedTextLength = intPart.length,
+                decimalDigits = CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS
+            )
+        } else {
+            MovableCursorOffsetMapping(
+                unmaskedText = text.toString(),
+                maskedText = newText.toString(),
+                decimalDigits = CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS
+            )
+        }
 
         return TransformedText(newText, offsetMapping)
     }
 
-    private inner class ThousandSeparatorOffsetMapping(
-        val originalIntegerLength: Int
+    private inner class FixedCursorOffsetMapping(
+        private val unmaskedTextLength: Int,
+        private val decimalDigits: Int
     ) : OffsetMapping {
         override fun originalToTransformed(offset: Int): Int =
             when (offset) {
                 0, 1, 2 -> 4
-                else -> offset + 1 + calculateThousandsSeparatorCount(originalIntegerLength)
+                else -> offset + 1 + calculateThousandsSeparatorCount(unmaskedTextLength)
             }
 
         override fun transformedToOriginal(offset: Int): Int =
-            originalIntegerLength + calculateThousandsSeparatorCount(originalIntegerLength) + 2
+            unmaskedTextLength + calculateThousandsSeparatorCount(unmaskedTextLength) + decimalDigits
 
-        private fun calculateThousandsSeparatorCount(intDigitCount: Int) =
-            max((intDigitCount - 1) / 3, 0)
+        private fun calculateThousandsSeparatorCount(unmaskedTextLength: Int) =
+            max((unmaskedTextLength - 1) / 3, 0)
+    }
+
+    private inner class MovableCursorOffsetMapping(
+        private val unmaskedText: String,
+        private val maskedText: String,
+        private val decimalDigits: Int
+    ) : OffsetMapping {
+        override fun originalToTransformed(offset: Int): Int =
+            when {
+                unmaskedText.length <= decimalDigits -> {
+                    maskedText.length - (unmaskedText.length - offset)
+                }
+                else -> {
+                    offset + offsetMaskCount(offset, maskedText)
+                }
+            }
+
+        override fun transformedToOriginal(offset: Int): Int =
+            when {
+                unmaskedText.length <= decimalDigits -> {
+                    max(unmaskedText.length - (maskedText.length - offset), 0)
+                }
+                else -> {
+                    offset - maskedText.take(offset).count { !it.isDigit() }
+                }
+            }
+
+        private fun offsetMaskCount(offset: Int, maskedText: String): Int {
+            var maskOffsetCount = 0
+            var dataCount = 0
+            for (maskChar in maskedText) {
+                if (!maskChar.isDigit()) {
+                    maskOffsetCount++
+                } else if (++dataCount > offset) {
+                    break
+                }
+            }
+            return maskOffsetCount
+        }
     }
 }
