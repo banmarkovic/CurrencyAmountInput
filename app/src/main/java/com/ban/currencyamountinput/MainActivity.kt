@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
                         },
                         label = { Text("Currency Amount") },
                         visualTransformation = CurrencyAmountInputVisualTransformation(
-                            fixedCursorAtTheEnd = true
+                            fixedCursorAtTheEnd = false
                         ),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.NumberPassword

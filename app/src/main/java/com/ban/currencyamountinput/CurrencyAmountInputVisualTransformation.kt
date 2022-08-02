@@ -8,15 +8,11 @@ import java.lang.Integer.max
 import java.text.DecimalFormat
 
 class CurrencyAmountInputVisualTransformation(
-    private val fixedCursorAtTheEnd: Boolean = true
+    private val fixedCursorAtTheEnd: Boolean = true,
+    private val numberOfDecimals: Int = 2
 ) : VisualTransformation {
 
-    companion object {
-        const val CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS = 2
-    }
-
     private val symbols = DecimalFormat().decimalFormatSymbols
-    private val thousandsReplacementPattern = Regex("\\B(?=(?:\\d{3})+(?!\\d))")
 
     override fun filter(text: AnnotatedString): TransformedText {
         val thousandsSeparator = symbols.groupingSeparator
@@ -25,67 +21,59 @@ class CurrencyAmountInputVisualTransformation(
 
         val inputText = text.text
 
-        val intPart = if (inputText.length > CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS) {
-            inputText.subSequence(0, inputText.length - CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS)
-        } else {
-            zero.toString()
-        }
-        var fractionPart = if (inputText.length >= CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS) {
-            inputText.subSequence(
-                inputText.length - CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS,
-                inputText.length
-            )
-        } else {
-            inputText
+        val intPart = inputText
+            .dropLast(numberOfDecimals)
+            .reversed()
+            .chunked(3)
+            .joinToString(thousandsSeparator.toString())
+            .reversed()
+            .ifEmpty {
+                zero.toString()
+            }
+
+        val fractionPart = inputText.takeLast(numberOfDecimals).let {
+            if (it.length != numberOfDecimals) {
+                List(numberOfDecimals - it.length) {
+                    zero
+                }.joinToString("") + it
+            } else {
+                it
+            }
         }
 
-        val formattedIntWithThousandsSeparator =
-            intPart.replace(thousandsReplacementPattern, thousandsSeparator.toString())
-
-        if (fractionPart.length < CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS) {
-            fractionPart = fractionPart.padStart(CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS, zero)
-        }
+        val formattedNumber = intPart + decimalSeparator + fractionPart
 
         val newText = AnnotatedString(
-            formattedIntWithThousandsSeparator + decimalSeparator + fractionPart,
-            text.spanStyles,
-            text.paragraphStyles
+            text = formattedNumber,
+            spanStyles = text.spanStyles,
+            paragraphStyles = text.paragraphStyles
         )
 
         val offsetMapping = if (fixedCursorAtTheEnd) {
             FixedCursorOffsetMapping(
-                unmaskedTextLength = intPart.length,
-                decimalDigits = CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS
+                contentLength = inputText.length,
+                formattedContentLength = formattedNumber.length
             )
         } else {
             MovableCursorOffsetMapping(
                 unmaskedText = text.toString(),
                 maskedText = newText.toString(),
-                decimalDigits = CURRENCY_AMOUNT_FORMAT_NUMBER_OF_DECIMALS
+                decimalDigits = numberOfDecimals
             )
         }
 
         return TransformedText(newText, offsetMapping)
     }
 
-    private inner class FixedCursorOffsetMapping(
-        private val unmaskedTextLength: Int,
-        private val decimalDigits: Int
+    private class FixedCursorOffsetMapping(
+        private val contentLength: Int,
+        private val formattedContentLength: Int,
     ) : OffsetMapping {
-        override fun originalToTransformed(offset: Int): Int =
-            when (offset) {
-                0, 1, 2 -> 4
-                else -> offset + 1 + calculateThousandsSeparatorCount(unmaskedTextLength)
-            }
-
-        override fun transformedToOriginal(offset: Int): Int =
-            unmaskedTextLength + calculateThousandsSeparatorCount(unmaskedTextLength) + decimalDigits
-
-        private fun calculateThousandsSeparatorCount(unmaskedTextLength: Int) =
-            max((unmaskedTextLength - 1) / 3, 0)
+        override fun originalToTransformed(offset: Int): Int = formattedContentLength
+        override fun transformedToOriginal(offset: Int): Int = contentLength
     }
 
-    private inner class MovableCursorOffsetMapping(
+    private class MovableCursorOffsetMapping(
         private val unmaskedText: String,
         private val maskedText: String,
         private val decimalDigits: Int
